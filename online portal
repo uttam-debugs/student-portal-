@@ -1,0 +1,612 @@
+import tkinter as tk
+from tkinter import ttk, messagebox
+import json
+import os
+from datetime import date
+from typing import Any, Dict, List, Union, Optional, TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
+    from matplotlib.figure import Figure
+
+try:
+    import matplotlib
+    matplotlib.use('TkAgg')
+    from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
+    from matplotlib.figure import Figure
+    MATPLOTLIB_AVAILABLE = True
+except Exception:
+    MATPLOTLIB_AVAILABLE = False
+    FigureCanvasTkAgg = None  # type: ignore
+    Figure = None  # type: ignore
+
+def load_data(filename: str) -> Union[List[Dict[str, Any]], Dict[str, Any]]:
+    """Load JSON data; create file with sensible defaults if missing or corrupted."""
+    base_dir = os.path.dirname(os.path.abspath(filename))
+    if base_dir and not os.path.exists(base_dir):
+        os.makedirs(base_dir, exist_ok=True)
+
+    if not os.path.exists(filename):
+        if filename == "users.json":
+            default: Union[List[Dict[str, Any]], Dict[str, Any]] = []
+        elif filename == "attendance.json":
+            default = {"meta": {"total_days": 0, "dates": []}, "records": {}}
+        elif filename == "fees.json":
+            default = []
+        else:
+            default = []
+        with open(filename, "w") as f:
+            json.dump(default, f)
+
+    try:
+        with open(filename, "r") as f:
+            return json.load(f)
+    except json.JSONDecodeError:
+        if filename == "users.json":
+            default = []
+        elif filename == "attendance.json":
+            default = {"meta": {"total_days": 0, "dates": []}, "records": {}}
+        elif filename == "fees.json":
+            default = []
+        else:
+            default = []
+        with open(filename, "w") as f:
+            json.dump(default, f)
+        return default
+
+
+def save_data(filename: str, data: Union[List[Dict[str, Any]], Dict[str, Any]]) -> None:
+    with open(filename, "w") as f:
+        json.dump(data, f, indent=4)
+
+
+USERS_FILE = "users.json"
+ATT_FILE = "attendance.json"
+FEES_FILE = "fees.json"
+
+
+def ensure_files() -> None:
+    load_data(USERS_FILE)
+    load_data(ATT_FILE)
+    load_data(FEES_FILE)
+
+
+class ExamPortalApp(tk.Tk):
+    def __init__(self):
+        super().__init__()
+        self.title("Exam Portal - GUI (No Exam)")
+        self.geometry("900x600")
+        self.resizable(False, False)
+
+        self.dark_mode = False
+        self.base_bg = "#f0f0f0"
+        self.base_fg = "#000000"
+        self.dark_bg = "#2b2b2b"
+        self.dark_fg = "#f5f5f5"
+
+        ensure_files()
+
+        self.current_user = None
+
+        self.style = ttk.Style()
+        self.set_theme()
+
+        self.create_widgets()
+
+    def set_theme(self):
+        if self.dark_mode:
+            bg = self.dark_bg
+            fg = self.dark_fg
+            entry_bg = '#3a3a3a'
+        else:
+            bg = self.base_bg
+            fg = self.base_fg
+            entry_bg = 'white'
+
+        try:
+            self.style.configure("TFrame", background=bg)
+            self.style.configure("TLabel", background=bg, foreground=fg)
+            self.style.configure("TButton", background=bg, foreground=fg)
+            self.style.configure("TEntry", fieldbackground=entry_bg, foreground=fg)
+        except Exception:
+            pass
+        self.configure(background=bg)
+
+    def toggle_theme(self):
+        self.dark_mode = not self.dark_mode
+        self.set_theme()
+
+    def create_widgets(self):
+        self.container = ttk.Frame(self)
+        self.container.place(relwidth=1, relheight=1)
+
+        self.frames = {}
+        for F in (LoginPage, RegisterPage, StudentDashboard, AdminDashboard):
+            frame = F(self.container, self)
+            self.frames[F.__name__] = frame
+            frame.place(relwidth=1, relheight=1)
+
+        self.show_frame("LoginPage")
+
+    def show_frame(self, name: str):
+        frame = self.frames.get(name)
+        if frame:
+            frame.tkraise()
+
+
+class LoginPage(ttk.Frame):
+    def __init__(self, parent, controller):
+        super().__init__(parent)
+        self.controller = controller
+
+        ttk.Label(self, text="Welcome to the Portal", font=("Arial", 20)).pack(pady=20)
+
+        form = ttk.Frame(self)
+        form.pack(pady=10)
+
+        ttk.Label(form, text="Username:").grid(row=0, column=0, sticky="e", padx=5, pady=5)
+        self.username_entry = ttk.Entry(form)
+        self.username_entry.grid(row=0, column=1, padx=5, pady=5)
+
+        ttk.Label(form, text="Password:").grid(row=1, column=0, sticky="e", padx=5, pady=5)
+        self.password_entry = ttk.Entry(form, show='*')
+        self.password_entry.grid(row=1, column=1, padx=5, pady=5)
+
+        btn_frame = ttk.Frame(self)
+        btn_frame.pack(pady=10)
+
+        ttk.Button(btn_frame, text="Login (Student)", command=self.student_login).grid(row=0, column=0, padx=5)
+        ttk.Button(btn_frame, text="Admin Login", command=self.admin_login).grid(row=0, column=1, padx=5)
+        ttk.Button(btn_frame, text="Register", command=lambda: controller.show_frame("RegisterPage")).grid(row=0, column=2, padx=5)
+
+        ttk.Button(self, text="Toggle Dark/Light", command=controller.toggle_theme).pack(pady=8)
+
+    def student_login(self):
+        username = self.username_entry.get().strip()
+        password = self.password_entry.get().strip()
+
+        users_data = load_data(USERS_FILE)
+        users = users_data if isinstance(users_data, list) else []
+        
+        for u in users:
+            if isinstance(u, dict) and u.get("username") == username and u.get("password") == password:
+                self.controller.current_user = username
+                messagebox.showinfo("Login", "Student login successful!")
+                student_frame = self.controller.frames.get('StudentDashboard')
+                if student_frame:
+                    student_frame.refresh()
+                self.controller.show_frame('StudentDashboard')
+                return
+
+        messagebox.showerror("Error", "Invalid username or password")
+
+    def admin_login(self):
+        username = self.username_entry.get().strip()
+        password = self.password_entry.get().strip()
+        if username == 'admin' and password == 'admin123':
+            self.controller.current_user = 'admin'
+            messagebox.showinfo('Admin', 'Admin login successful')
+            admin_frame = self.controller.frames.get('AdminDashboard')
+            if admin_frame:
+                admin_frame.refresh()
+            self.controller.show_frame('AdminDashboard')
+        else:
+            messagebox.showerror('Error', 'Invalid admin credentials')
+
+
+class RegisterPage(ttk.Frame):
+    def __init__(self, parent, controller):
+        super().__init__(parent)
+        self.controller = controller
+
+        ttk.Label(self, text="Register New Student", font=("Arial", 18)).pack(pady=12)
+
+        form = ttk.Frame(self)
+        form.pack(pady=10)
+
+        ttk.Label(form, text="Username:").grid(row=0, column=0, sticky='e', padx=5, pady=5)
+        self.username_entry = ttk.Entry(form)
+        self.username_entry.grid(row=0, column=1, padx=5, pady=5)
+
+        ttk.Label(form, text="Password:").grid(row=1, column=0, sticky='e', padx=5, pady=5)
+        self.password_entry = ttk.Entry(form, show='*')
+        self.password_entry.grid(row=1, column=1, padx=5, pady=5)
+
+        ttk.Label(form, text="Full Name:").grid(row=2, column=0, sticky='e', padx=5, pady=5)
+        self.fullname_entry = ttk.Entry(form)
+        self.fullname_entry.grid(row=2, column=1, padx=5, pady=5)
+
+        ttk.Button(self, text="Create Account", command=self.register_user).pack(pady=10)
+        ttk.Button(self, text="Back to Login", command=lambda: controller.show_frame('LoginPage')).pack()
+
+    def register_user(self):
+        username = self.username_entry.get().strip()
+        password = self.password_entry.get().strip()
+        fullname = self.fullname_entry.get().strip()
+
+        if not username or not password:
+            messagebox.showerror('Error', 'Username and password required')
+            return
+
+        users_data = load_data(USERS_FILE)
+        users = users_data if isinstance(users_data, list) else []
+        
+        for u in users:
+            if isinstance(u, dict) and u.get('username') == username:
+                messagebox.showerror('Error', 'User already exists')
+                return
+
+        users.append({'username': username, 'password': password, 'fullname': fullname})
+        save_data(USERS_FILE, users)
+
+        fees_data = load_data(FEES_FILE)
+        fees = fees_data if isinstance(fees_data, list) else []
+        if not any(isinstance(f, dict) and f.get('user') == username for f in fees):
+            fees.append({'user': username, 'due': 0})
+            save_data(FEES_FILE, fees)
+
+        messagebox.showinfo('Success', 'User created successfully')
+        self.controller.show_frame('LoginPage')
+
+
+class StudentDashboard(ttk.Frame):
+    def __init__(self, parent, controller):
+        super().__init__(parent)
+        self.controller = controller
+
+        header = ttk.Frame(self)
+        header.pack(fill='x', pady=8)
+
+        self.lbl_welcome = ttk.Label(header, text='')
+        self.lbl_welcome.pack(side='left', padx=10)
+
+        ttk.Button(header, text='Logout', command=self.logout).pack(side='right', padx=10)
+
+        body = ttk.Frame(self)
+        body.pack(expand=True, fill='both', padx=20, pady=10)
+
+        left = ttk.Frame(body)
+        left.pack(side='left', fill='y', padx=10)
+
+        ttk.Label(left, text='Attendance (%)', font=("Arial", 14)).pack(pady=6)
+        self.att_label = ttk.Label(left, text='0%')
+        self.att_label.pack()
+
+        ttk.Label(left, text='Fee Due', font=("Arial", 14)).pack(pady=6)
+        self.fee_label = ttk.Label(left, text='₹0')
+        self.fee_label.pack()
+
+        ttk.Button(left, text='Refresh', command=self.refresh).pack(pady=10)
+
+        right = ttk.Frame(body)
+        right.pack(side='left', fill='both', expand=True)
+
+        ttk.Label(right, text='Attendance Graph (by day)', font=("Arial", 14)).pack(pady=6)
+        if MATPLOTLIB_AVAILABLE and Figure is not None and FigureCanvasTkAgg is not None:
+            self.fig = Figure(figsize=(6,4), dpi=100)
+            self.ax = self.fig.add_subplot(111)
+            self.ax.set_title('Attendance over time')
+            self.canvas = FigureCanvasTkAgg(self.fig, master=right)
+            self.canvas.get_tk_widget().pack(fill='both', expand=True)
+        else:
+            ttk.Label(right, text='Matplotlib not available; graph disabled').pack(pady=20)
+
+    def refresh(self):
+        user = self.controller.current_user
+        if not user:
+            return
+        self.lbl_welcome.config(text=f'Welcome, {user}')
+
+        att_data = load_data(ATT_FILE)
+        if isinstance(att_data, dict):
+            total_days = att_data.get('meta', {}).get('total_days', 0)
+            records = att_data.get('records', {})
+            user_present_dates = records.get(user, []) if isinstance(records, dict) else []
+        else:
+            total_days = 0
+            user_present_dates = []
+            
+        percent = 0.0
+        if total_days > 0:
+            percent = (len(user_present_dates) / total_days) * 100
+        self.att_label.config(text=f"{percent:.2f}%")
+
+        fees_data = load_data(FEES_FILE)
+        fees = fees_data if isinstance(fees_data, list) else []
+        due = 0
+        for f in fees:
+            if isinstance(f, dict) and f.get('user') == user:
+                due = f.get('due', 0)
+                break
+        self.fee_label.config(text=f'₹{due}')
+
+        if MATPLOTLIB_AVAILABLE:
+            self.ax.clear()
+            self.ax.set_title('Attendance over time')
+            if total_days == 0:
+                self.ax.text(0.5, 0.5, 'No attendance recorded yet', ha='center')
+            else:
+                if isinstance(att_data, dict):
+                    meta_dates = att_data.get('meta', {}).get('dates', [])
+                else:
+                    meta_dates = []
+                    
+                if meta_dates:
+                    days = list(range(1, len(meta_dates)+1))
+                    cumulative = []
+                    count = 0
+                    for d in meta_dates:
+                        if d in user_present_dates:
+                            count += 1
+                        cumulative.append(count)
+                    self.ax.plot(days, cumulative, marker='o')
+                    self.ax.set_xlabel('Day index')
+                    self.ax.set_ylabel('Cumulative days present')
+                else:
+                    self.ax.bar(['Present %'], [percent])
+                    self.ax.set_ylim(0,100)
+            try:
+                self.canvas.draw()
+            except Exception:
+                pass
+
+    def logout(self):
+        self.controller.current_user = None
+        self.controller.show_frame('LoginPage')
+
+
+class AdminDashboard(ttk.Frame):
+    def __init__(self, parent, controller):
+        super().__init__(parent)
+        self.controller = controller
+
+        header = ttk.Frame(self)
+        header.pack(fill='x', pady=6)
+        ttk.Label(header, text='Admin Panel', font=("Arial", 18)).pack(side='left', padx=10)
+        ttk.Button(header, text='Logout', command=self.logout).pack(side='right', padx=10)
+
+        body = ttk.Frame(self)
+        body.pack(fill='both', expand=True, padx=10, pady=10)
+
+        left = ttk.Frame(body)
+        left.pack(side='left', fill='y', padx=8)
+
+        ttk.Button(left, text='Add Student', command=self.add_student_popup).pack(fill='x', pady=4)
+        ttk.Button(left, text='View Students', command=self.view_students_popup).pack(fill='x', pady=4)
+        ttk.Button(left, text='Mark Attendance', command=self.mark_attendance_popup).pack(fill='x', pady=4)
+        ttk.Button(left, text='Update Fee', command=self.update_fee_popup).pack(fill='x', pady=4)
+        ttk.Button(left, text='Set Total Days (manual)', command=self.set_total_days_popup).pack(fill='x', pady=4)
+
+        right = ttk.Frame(body)
+        right.pack(side='left', fill='both', expand=True)
+
+        ttk.Label(right, text='Instructions:', font=("Arial", 12, 'underline')).pack(anchor='nw')
+        instr = """
+- Use 'Add Student' to create new student accounts.
+- 'Mark Attendance' allows selecting students present for a given date; the date is recorded in order and total_days will reflect the number of unique dates.
+- Students can view their attendance percentage and a cumulative graph on their dashboard.
+- 'Update Fee' edits student's fee due amount.
+"""
+        ttk.Label(right, text=instr, wraplength=500).pack(anchor='nw', pady=6)
+
+    def refresh(self):
+        pass
+
+    def logout(self):
+        self.controller.current_user = None
+        self.controller.show_frame('LoginPage')
+
+    def add_student_popup(self):
+        popup = tk.Toplevel(self)
+        popup.title('Add Student')
+        popup.geometry('350x220')
+
+        ttk.Label(popup, text='Username:').pack(pady=6)
+        username_entry = ttk.Entry(popup)
+        username_entry.pack()
+
+        ttk.Label(popup, text='Password:').pack(pady=6)
+        password_entry = ttk.Entry(popup, show='*')
+        password_entry.pack()
+
+        ttk.Label(popup, text='Full Name:').pack(pady=6)
+        fullname_entry = ttk.Entry(popup)
+        fullname_entry.pack()
+
+        def create():
+            username = username_entry.get().strip()
+            password = password_entry.get().strip()
+            fullname = fullname_entry.get().strip()
+            if not username or not password:
+                messagebox.showerror('Error', 'Username and password required')
+                return
+            
+            users_data = load_data(USERS_FILE)
+            users = users_data if isinstance(users_data, list) else []
+            
+            for u in users:
+                if isinstance(u, dict) and u.get('username') == username:
+                    messagebox.showerror('Error', 'User exists')
+                    return
+            users.append({'username': username, 'password': password, 'fullname': fullname})
+            save_data(USERS_FILE, users)
+            
+            fees_data = load_data(FEES_FILE)
+            fees = fees_data if isinstance(fees_data, list) else []
+            if not any(isinstance(f, dict) and f.get('user') == username for f in fees):
+                fees.append({'user': username, 'due': 0})
+                save_data(FEES_FILE, fees)
+            messagebox.showinfo('Success', 'Student added')
+            popup.destroy()
+
+        ttk.Button(popup, text='Create', command=create).pack(pady=10)
+
+    def view_students_popup(self):
+        popup = tk.Toplevel(self)
+        popup.title('Students')
+        popup.geometry('500x400')
+
+        users_data = load_data(USERS_FILE)
+        users = users_data if isinstance(users_data, list) else []
+
+        tree = ttk.Treeview(popup, columns=('username','fullname'), show='headings')
+        tree.heading('username', text='Username')
+        tree.heading('fullname', text='Full Name')
+        tree.pack(fill='both', expand=True)
+
+        for u in users:
+            if isinstance(u, dict):
+                tree.insert('', 'end', values=(u.get('username'), u.get('fullname','')))
+
+    def mark_attendance_popup(self):
+        popup = tk.Toplevel(self)
+        popup.title('Mark Attendance')
+        popup.geometry('600x500')
+
+        users_data = load_data(USERS_FILE)
+        users = users_data if isinstance(users_data, list) else []
+        
+        att_data = load_data(ATT_FILE)
+        if not isinstance(att_data, dict):
+            att_data = {"meta": {"total_days": 0, "dates": []}, "records": {}}
+        if 'meta' not in att_data:
+            att_data['meta'] = {'total_days': 0, 'dates': []}
+
+        ttk.Label(popup, text='Select date (YYYY-MM-DD):').pack(pady=6)
+        date_var = tk.StringVar(value=str(date.today()))
+        date_entry = ttk.Entry(popup, textvariable=date_var)
+        date_entry.pack(pady=4)
+
+        frame = ttk.Frame(popup)
+        frame.pack(fill='both', expand=True, pady=6)
+
+        check_vars = {}
+        for u in users:
+            if isinstance(u, dict) and u.get('username') != 'admin':
+                var = tk.BooleanVar()
+                chk = ttk.Checkbutton(frame, text=f"{u.get('username')} ({u.get('fullname','')})", variable=var)
+                chk.pack(anchor='w')
+                check_vars[u['username']] = var
+
+        def submit():
+            sel_date = date_var.get().strip()
+            if not sel_date:
+                messagebox.showerror('Error', 'Date required')
+                return
+            
+            if not isinstance(att_data, dict):
+                return
+                
+            if 'meta' not in att_data:
+                att_data['meta'] = {'dates': [], 'total_days': 0}
+            
+            meta = att_data['meta']
+            if not isinstance(meta, dict):
+                return
+                
+            if 'dates' not in meta:
+                meta['dates'] = []
+                
+            dates_list = meta['dates']
+            if isinstance(dates_list, list) and sel_date not in dates_list:
+                dates_list.append(sel_date)
+            
+            meta['total_days'] = len(dates_list) if isinstance(dates_list, list) else 0
+
+            if 'records' not in att_data:
+                att_data['records'] = {}
+                
+            records = att_data['records']
+            for username, var in check_vars.items():
+                if var.get():
+                    if username not in records:
+                        records[username] = []
+                    if sel_date not in records[username]:
+                        records[username].append(sel_date)
+            save_data(ATT_FILE, att_data)
+            messagebox.showinfo('Success', 'Attendance updated')
+            popup.destroy()
+
+        ttk.Button(popup, text='Submit', command=submit).pack(pady=10)
+
+    def update_fee_popup(self):
+        popup = tk.Toplevel(self)
+        popup.title('Update Fee')
+        popup.geometry('380x250')
+
+        users_data = load_data(USERS_FILE)
+        users = users_data if isinstance(users_data, list) else []
+        usernames = [str(u.get('username', '')) for u in users if isinstance(u, dict) and u.get('username') and u.get('username') != 'admin']
+
+        ttk.Label(popup, text='Select Student:').pack(pady=6)
+        sel_var = tk.StringVar()
+        sel = ttk.Combobox(popup, values=usernames, textvariable=sel_var)
+        sel.pack()
+
+        ttk.Label(popup, text='New Due Amount (₹):').pack(pady=6)
+        amt_entry = ttk.Entry(popup)
+        amt_entry.pack()
+
+        def update():
+            user = sel_var.get().strip()
+            if not user:
+                messagebox.showerror('Error','Select student')
+                return
+            try:
+                amt = float(amt_entry.get().strip())
+            except Exception:
+                messagebox.showerror('Error','Invalid amount')
+                return
+            
+            fees_data = load_data(FEES_FILE)
+            fees = fees_data if isinstance(fees_data, list) else []
+            found = False
+            for f in fees:
+                if isinstance(f, dict) and f.get('user') == user:
+                    f['due'] = amt
+                    found = True
+                    break
+            if not found:
+                fees.append({'user': user, 'due': amt})
+            save_data(FEES_FILE, fees)
+            messagebox.showinfo('Success', 'Fee updated')
+            popup.destroy()
+
+        ttk.Button(popup, text='Update', command=update).pack(pady=10)
+
+    def set_total_days_popup(self):
+        popup = tk.Toplevel(self)
+        popup.title('Set Total Days')
+        popup.geometry('300x160')
+
+        att_data = load_data(ATT_FILE)
+        if isinstance(att_data, dict):
+            current = att_data.get('meta', {}).get('total_days', 0)
+        else:
+            att_data = {"meta": {"total_days": 0, "dates": []}, "records": {}}
+            current = 0
+
+        ttk.Label(popup, text=f'Current total days: {current}').pack(pady=6)
+        ttk.Label(popup, text='Set new total days value:').pack(pady=6)
+        val_entry = ttk.Entry(popup)
+        val_entry.pack()
+
+        def setv():
+            try:
+                v = int(val_entry.get().strip())
+            except Exception:
+                messagebox.showerror('Error', 'Invalid integer')
+                return
+            if 'meta' not in att_data:
+                att_data['meta'] = {}
+            att_data['meta']['total_days'] = v
+            save_data(ATT_FILE, att_data)
+            messagebox.showinfo('Success', 'Total days updated')
+            popup.destroy()
+
+        ttk.Button(popup, text='Set', command=setv).pack(pady=8)
+
+
+if __name__ == '__main__':
+    app = ExamPortalApp()
+    app.mainloop()
