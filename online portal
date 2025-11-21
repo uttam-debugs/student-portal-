@@ -33,6 +33,8 @@ def load_data(filename: str) -> Union[List[Dict[str, Any]], Dict[str, Any]]:
             default = {"meta": {"total_days": 0, "dates": []}, "records": {}}
         elif filename == "fees.json":
             default = []
+        elif filename == "internal_marks.json":
+            default = {"subjects": [], "marks": {}}
         else:
             default = []
         with open(filename, "w") as f:
@@ -48,6 +50,8 @@ def load_data(filename: str) -> Union[List[Dict[str, Any]], Dict[str, Any]]:
             default = {"meta": {"total_days": 0, "dates": []}, "records": {}}
         elif filename == "fees.json":
             default = []
+        elif filename == "internal_marks.json":
+            default = {"subjects": [], "marks": {}}
         else:
             default = []
         with open(filename, "w") as f:
@@ -63,12 +67,14 @@ def save_data(filename: str, data: Union[List[Dict[str, Any]], Dict[str, Any]]) 
 USERS_FILE = "users.json"
 ATT_FILE = "attendance.json"
 FEES_FILE = "fees.json"
+INTERNAL_MARKS_FILE = "internal_marks.json"
 
 
 def ensure_files() -> None:
     load_data(USERS_FILE)
     load_data(ATT_FILE)
     load_data(FEES_FILE)
+    load_data(INTERNAL_MARKS_FILE)
 
 
 class ExamPortalApp(tk.Tk):
@@ -276,6 +282,14 @@ class StudentDashboard(ttk.Frame):
         self.fee_label = ttk.Label(left, text='₹0')
         self.fee_label.pack()
 
+        ttk.Label(left, text='Internal Marks', font=("Arial", 14, 'bold')).pack(pady=(15, 6))
+        
+        marks_scroll_frame = ttk.Frame(left)
+        marks_scroll_frame.pack(fill='both', expand=True, pady=6)
+        
+        self.marks_text = tk.Text(marks_scroll_frame, height=10, width=25, wrap='word', state='disabled')
+        self.marks_text.pack(fill='both', expand=True)
+
         ttk.Button(left, text='Refresh', command=self.refresh).pack(pady=10)
 
         right = ttk.Frame(body)
@@ -319,6 +333,30 @@ class StudentDashboard(ttk.Frame):
                 due = f.get('due', 0)
                 break
         self.fee_label.config(text=f'₹{due}')
+
+        marks_data = load_data(INTERNAL_MARKS_FILE)
+        self.marks_text.config(state='normal')
+        self.marks_text.delete('1.0', tk.END)
+        
+        if isinstance(marks_data, dict):
+            subjects = marks_data.get('subjects', [])
+            user_marks = marks_data.get('marks', {}).get(user, {})
+            
+            if subjects and isinstance(user_marks, dict):
+                for subj in subjects:
+                    mark = user_marks.get(subj, 'N/A')
+                    if isinstance(mark, (int, float)):
+                        self.marks_text.insert(tk.END, f'{subj}: {mark}/40\n')
+                    else:
+                        self.marks_text.insert(tk.END, f'{subj}: N/A\n')
+            elif subjects:
+                self.marks_text.insert(tk.END, 'No marks assigned yet')
+            else:
+                self.marks_text.insert(tk.END, 'No subjects available')
+        else:
+            self.marks_text.insert(tk.END, 'No marks data available')
+        
+        self.marks_text.config(state='disabled')
 
         if MATPLOTLIB_AVAILABLE:
             self.ax.clear()
@@ -375,6 +413,8 @@ class AdminDashboard(ttk.Frame):
         ttk.Button(left, text='View Students', command=self.view_students_popup).pack(fill='x', pady=4)
         ttk.Button(left, text='Mark Attendance', command=self.mark_attendance_popup).pack(fill='x', pady=4)
         ttk.Button(left, text='Update Fee', command=self.update_fee_popup).pack(fill='x', pady=4)
+        ttk.Button(left, text='Manage Subjects', command=self.manage_subjects_popup).pack(fill='x', pady=4)
+        ttk.Button(left, text='Assign Internal Marks', command=self.assign_internal_marks_popup).pack(fill='x', pady=4)
         ttk.Button(left, text='Set Total Days (manual)', command=self.set_total_days_popup).pack(fill='x', pady=4)
 
         right = ttk.Frame(body)
@@ -386,6 +426,8 @@ class AdminDashboard(ttk.Frame):
 - 'Mark Attendance' allows selecting students present for a given date; the date is recorded in order and total_days will reflect the number of unique dates.
 - Students can view their attendance percentage and a cumulative graph on their dashboard.
 - 'Update Fee' edits student's fee due amount.
+- 'Manage Subjects' allows you to add or remove subjects for internal marks.
+- 'Assign Internal Marks' lets you assign marks (out of 40) to students for each subject.
 """
         ttk.Label(right, text=instr, wraplength=500).pack(anchor='nw', pady=6)
 
@@ -605,6 +647,169 @@ class AdminDashboard(ttk.Frame):
             popup.destroy()
 
         ttk.Button(popup, text='Set', command=setv).pack(pady=8)
+
+    def manage_subjects_popup(self):
+        popup = tk.Toplevel(self)
+        popup.title('Manage Subjects')
+        popup.geometry('500x450')
+
+        marks_data = load_data(INTERNAL_MARKS_FILE)
+        if not isinstance(marks_data, dict):
+            marks_data = {"subjects": [], "marks": {}}
+        
+        subjects = marks_data.get('subjects', [])
+
+        ttk.Label(popup, text='Existing Subjects:', font=("Arial", 12, 'bold')).pack(pady=6)
+
+        list_frame = ttk.Frame(popup)
+        list_frame.pack(fill='both', expand=True, padx=10, pady=6)
+
+        scrollbar = ttk.Scrollbar(list_frame)
+        scrollbar.pack(side='right', fill='y')
+
+        subject_listbox = tk.Listbox(list_frame, yscrollcommand=scrollbar.set)
+        subject_listbox.pack(side='left', fill='both', expand=True)
+        scrollbar.config(command=subject_listbox.yview)
+
+        def refresh_list():
+            subject_listbox.delete(0, tk.END)
+            for subj in subjects:
+                subject_listbox.insert(tk.END, subj)
+
+        refresh_list()
+
+        ttk.Label(popup, text='Add New Subject:').pack(pady=6)
+        new_subj_entry = ttk.Entry(popup, width=30)
+        new_subj_entry.pack(pady=4)
+
+        def add_subject():
+            new_subj = new_subj_entry.get().strip()
+            if not new_subj:
+                messagebox.showerror('Error', 'Subject name required')
+                return
+            if new_subj in subjects:
+                messagebox.showerror('Error', 'Subject already exists')
+                return
+            subjects.append(new_subj)
+            marks_data['subjects'] = subjects
+            save_data(INTERNAL_MARKS_FILE, marks_data)
+            refresh_list()
+            new_subj_entry.delete(0, tk.END)
+            messagebox.showinfo('Success', f'Subject "{new_subj}" added')
+
+        def remove_subject():
+            selection = subject_listbox.curselection()
+            if not selection:
+                messagebox.showerror('Error', 'Select a subject to remove')
+                return
+            subj_to_remove = subject_listbox.get(selection[0])
+            if messagebox.askyesno('Confirm', f'Remove subject "{subj_to_remove}"?\nAll marks for this subject will be deleted.'):
+                subjects.remove(subj_to_remove)
+                marks_data['subjects'] = subjects
+                if 'marks' in marks_data and isinstance(marks_data['marks'], dict):
+                    for student in marks_data['marks']:
+                        if isinstance(marks_data['marks'][student], dict) and subj_to_remove in marks_data['marks'][student]:
+                            del marks_data['marks'][student][subj_to_remove]
+                save_data(INTERNAL_MARKS_FILE, marks_data)
+                refresh_list()
+                messagebox.showinfo('Success', f'Subject "{subj_to_remove}" removed')
+
+        btn_frame = ttk.Frame(popup)
+        btn_frame.pack(pady=10)
+        ttk.Button(btn_frame, text='Add Subject', command=add_subject).pack(side='left', padx=5)
+        ttk.Button(btn_frame, text='Remove Selected', command=remove_subject).pack(side='left', padx=5)
+
+    def assign_internal_marks_popup(self):
+        popup = tk.Toplevel(self)
+        popup.title('Assign Internal Marks')
+        popup.geometry('600x500')
+
+        marks_data = load_data(INTERNAL_MARKS_FILE)
+        if not isinstance(marks_data, dict):
+            marks_data = {"subjects": [], "marks": {}}
+        
+        subjects = marks_data.get('subjects', [])
+        if not subjects:
+            messagebox.showwarning('Warning', 'No subjects found. Please add subjects first using "Manage Subjects".')
+            popup.destroy()
+            return
+
+        users_data = load_data(USERS_FILE)
+        users = users_data if isinstance(users_data, list) else []
+        student_usernames = [str(u.get('username', '')) for u in users if isinstance(u, dict) and u.get('username') and u.get('username') != 'admin']
+
+        if not student_usernames:
+            messagebox.showwarning('Warning', 'No students found.')
+            popup.destroy()
+            return
+
+        ttk.Label(popup, text='Select Student:', font=("Arial", 11)).pack(pady=6)
+        student_var = tk.StringVar()
+        student_combo = ttk.Combobox(popup, values=student_usernames, textvariable=student_var, state='readonly')
+        student_combo.pack(pady=4)
+
+        ttk.Label(popup, text='Subject Marks (out of 40):', font=("Arial", 11, 'bold')).pack(pady=10)
+
+        marks_frame = ttk.Frame(popup)
+        marks_frame.pack(fill='both', expand=True, padx=20, pady=6)
+
+        mark_entries = {}
+        for subj in subjects:
+            subj_frame = ttk.Frame(marks_frame)
+            subj_frame.pack(fill='x', pady=4)
+            ttk.Label(subj_frame, text=f'{subj}:', width=20).pack(side='left', padx=5)
+            entry = ttk.Entry(subj_frame, width=10)
+            entry.pack(side='left', padx=5)
+            ttk.Label(subj_frame, text='/ 40').pack(side='left')
+            mark_entries[subj] = entry
+
+        def load_marks():
+            student = student_var.get().strip()
+            if not student:
+                return
+            if 'marks' not in marks_data:
+                marks_data['marks'] = {}
+            student_marks = marks_data['marks'].get(student, {})
+            for subj, entry in mark_entries.items():
+                entry.delete(0, tk.END)
+                if isinstance(student_marks, dict) and subj in student_marks:
+                    entry.insert(0, str(student_marks[subj]))
+
+        def save_marks():
+            student = student_var.get().strip()
+            if not student:
+                messagebox.showerror('Error', 'Please select a student')
+                return
+            
+            if 'marks' not in marks_data:
+                marks_data['marks'] = {}
+            
+            if student not in marks_data['marks']:
+                marks_data['marks'][student] = {}
+            
+            try:
+                for subj, entry in mark_entries.items():
+                    mark_text = entry.get().strip()
+                    if mark_text:
+                        mark = float(mark_text)
+                        if mark < 0 or mark > 40:
+                            messagebox.showerror('Error', f'Marks for {subj} must be between 0 and 40')
+                            return
+                        marks_data['marks'][student][subj] = mark
+                    elif subj in marks_data['marks'][student]:
+                        del marks_data['marks'][student][subj]
+                
+                save_data(INTERNAL_MARKS_FILE, marks_data)
+                messagebox.showinfo('Success', f'Marks saved for {student}')
+            except ValueError:
+                messagebox.showerror('Error', 'Please enter valid numbers for marks')
+
+        student_combo.bind('<<ComboboxSelected>>', lambda e: load_marks())
+
+        btn_frame = ttk.Frame(popup)
+        btn_frame.pack(pady=15)
+        ttk.Button(btn_frame, text='Save Marks', command=save_marks).pack(side='left', padx=5)
+        ttk.Button(btn_frame, text='Load Marks', command=load_marks).pack(side='left', padx=5)
 
 
 if __name__ == '__main__':
